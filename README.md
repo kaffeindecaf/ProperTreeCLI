@@ -53,6 +53,18 @@ sticks for the session. R replaces the query inside string values
 (when the search is scoped to keys it refuses; replacing keys is a
 rename, do it by hand with r).
 
+^t (ctrl+t) opens the value converter on the selected entry: read the
+text as ascii, base64, decimal, hex, or binary and render it as
+another. pick from and to, tweak the text if you like, and enter on
+the result writes it back as the entry's own kind - pasting foreign
+base64 into a data field and entering stores the decoded bytes in one
+trip.
+
+T inserts from the OpenCore/Clover preset library: pick a section,
+then a path (Kernel/Add, ACPI/Patch...), then a preset such as a blank
+entry or a ready kext pack. Missing containers are created along the
+way; it asks before clobbering anything.
+
 Hold j/k or the arrows and movement accelerates smoothly: one row per
 repeat at first, then gradually more, no sudden jumps.
 
@@ -107,7 +119,8 @@ instead of rewriting them:
 - the oc snapshot code walks ACPI/Kexts/Tools/Drivers, orders kexts
   by dependency, and detects the schema from OpenCore.efi's md5 - a
   headless snapshot command is next, tracked in ROADMAP.md
-- find/replace is ported; the ascii/hex/base64 converter is pending
+- find/replace is ported, as are the value converter and the
+  OpenCore/Clover insert-from-template presets
 
 Progress lives in ROADMAP.md. It is a checklist, not a plan: one item
 per session, done end to end or not done.

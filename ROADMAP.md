@@ -276,10 +276,35 @@ snapshot logic in plistwindow.py, the converter, the settings model.
   tk dropdown filters by plist type (key/boolean/data/date/number/uid/
   string) - a terminal finder searches value text across types instead,
   which is a superset for substring use._
-- [ ] **2.9 converter + templates** - the gui's ascii/base64/decimal/
+- [x] **2.9 converter + templates** - the gui's ascii/base64/decimal/
       hex/binary converter as a keybind on a selected value (parity with
       the tk converter window), and insert-from-template using
       config_tex_info.py + menu.plist (OpenCore/Clover samples).
+  _Done 2026-09-03: both halves live in the editor. ^t (ctrl+t, the same
+  accelerator the gui uses for its Convert Window) opens the converter
+  on the selected string/data/integer value: pick a from/to encoding
+  (ascii, base64, decimal, hex, binary), the source text is prefilled
+  with the value, conversion math mirrors convert_values() in
+  ProperTree.py (0x and <> tolerated in hex, odd nibbles padded,
+  base64 padding repaired, hex out grouped in 8s). enter on the result
+  writes the source back through the from-encoding as the node's own
+  kind: pasting foreign base64 into a data field then entering stores
+  the decoded bytes in one trip. encodings that cannot round-trip into
+  a kind (decimal/binary -> data) refuse with a "view only" flash.
+  T offers insert-from-template: section (OpenCore/Clover) -> path
+  (ACPI/Add, Kernel/Add, ...) -> preset (New Blank Entry, kext packs,
+  Drop DMAR...). presets know their own destination path + container
+  types (d = dict, a = array), so the walk creates missing containers
+  and appends into arrays / merges into dicts (confirm first when a
+  segment exists with the wrong type or a key would be clobbered), the
+  same merge_menu_preset semantics minus tk bookkeeping. the terminal
+  editor has no pointer, so the whole preset list is offered and the
+  preset's own path decides where it lands (tk filters by the
+  right-clicked node - noted deviation). data source is the repo's
+  Scripts/menu.plist, loaded lazily once. both keybinds are in the ?
+  overlay. pty scenario G covers: hex data -> pasted base64 -> stored
+  bytes, and two Kernel/Add blank inserts into a fresh file (first run
+  creates the path, second appends)._
 - [x] **2.10 editor view config** - a small config file decides how the
       editor opens files: everything expanded, everything collapsed, or
       the auto heuristic. plain key=value with # comments, template

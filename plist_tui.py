@@ -13,6 +13,7 @@
 # look follows W0lfSword: frost accents on grey, boxed menus, dim hints,
 # status glyphs. selection is a frost bar with dark text.
 
+import base64
 import copy
 import curses
 import datetime
@@ -156,6 +157,141 @@ _NEW_DEFAULTS = {
 def _parse(text, kind):
     from propertreecli import parse_value
     return parse_value(text, kind)
+
+# ── converter (roadmap 2.9) ─────────────────────────────────
+# the tk gui's Convert Window (Ctrl+T) is a scratchpad that
+# renders text as bytes in one encoding and back out in another.
+# same five views here: ascii, base64, decimal, hex, binary.
+_CONV_NAMES = ("Ascii", "Base64", "Decimal", "Hex", "Binary")
+
+def _convert_text(text, frm, to):
+    # raise ValueError with a readable reason on bad input
+    if not text:
+        raise ValueError("nothing to convert")
+    f, t = frm.lower(), to.lower()
+    if f == "hex":
+        v = text[2:] if text.lower().startswith("0x") else text
+        v = v.replace(" ", "").replace("<", "").replace(">", "")
+        if not v or any(c.lower() not in "0123456789abcdef" for c in v):
+            raise ValueError("hex text may only hold 0-9 a-f (0x, <>, spaces ok)")
+        if len(v) % 2:
+            v = "0" + v
+        data = bytes.fromhex(v)
+    elif f in ("decimal", "binary"):
+        base = 10 if f == "decimal" else 2
+        try:
+            n = int("".join(text.split()), base)
+        except ValueError:
+            raise ValueError("not a valid {} number: '{}'".format(frm, text.strip()))
+        h = "{:x}".format(n)
+        if len(h) % 2:
+            h = "0" + h
+        data = bytes.fromhex(h)
+    elif f == "base64":
+        s = "".join(text.split())
+        s2 = s.rstrip("=")
+        if len(s2) % 4 == 1:
+            raise ValueError("not valid base64 text")
+        s = s2 + "=" * ((4 - len(s2) % 4) % 4)
+        try:
+            data = base64.b64decode(s, validate=True)
+        except Exception:
+            raise ValueError("not valid base64 text")
+    else:  # ascii
+        data = text.encode("utf-8")
+    if t == "base64":
+        return base64.b64encode(data).decode("ascii")
+    if t == "hex":
+        out = data.hex().upper()
+        return " ".join(out[i:i + 8] for i in range(0, len(out), 8))
+    if t == "decimal":
+        return str(int(data.hex() or "0", 16))
+    if t == "binary":
+        return "{:b}".format(int(data.hex() or "0", 16))
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("bytes are not valid utf-8 text (try hex or base64)")
+
+def _convert_prefill(kind):
+    # (from_index, to_index) preselects for a node kind
+    if kind == "data":
+        return 3, 1        # hex -> base64
+    if kind == "integer":
+        return 2, 3        # decimal -> hex
+    return 0, 3            # string: ascii -> hex
+
+def _convert_apply(kind, text, frm):
+    # write the source text back into a value of the node's own kind,
+    # interpreting the text as the from-encoding (what the user picked
+    # in the converter). raises ValueError when that encoding cannot
+    # round-trip into the plist type (view-only conversions).
+    f = frm.lower()
+    if kind == "data":
+        if f == "hex":
+            return bytes.fromhex("".join(text.split()))
+        if f == "base64":
+            return base64.b64decode("".join(text.split()))
+        if f == "ascii":
+            return text.encode("utf-8")
+        raise ValueError("decimal/binary cannot rebuild data bytes - view only")
+    if kind == "integer":
+        base = {"decimal": 10, "hex": 16, "binary": 2}.get(f)
+        if base is None:
+            raise ValueError("ascii/base64 cannot rebuild an integer - view only")
+        clean = "".join(text.split())
+        if f == "hex":
+            clean = clean[2:] if clean.lower().startswith("0x") else clean
+        try:
+            return int(clean, base)
+        except ValueError:
+            raise ValueError("not a valid {} number: '{}'".format(frm, text.strip()))
+    # string
+    if f == "ascii":
+        return text
+    if f == "hex":
+        try:
+            return bytes.fromhex("".join(text.split())).decode("utf-8")
+        except UnicodeDecodeError:
+            raise ValueError("those bytes are not utf-8 text - view only")
+    if f == "base64":
+        try:
+            return base64.b64decode("".join(text.split())).decode("utf-8")
+        except Exception:
+            raise ValueError("not text in that base64 - view only")
+    raise ValueError("decimal/binary cannot rebuild a string - view only")
+
+# ── insert-from-template (roadmap 2.9) ───────────────────────
+# the tk gui right-clicks a node and offers presets from
+# Scripts/menu.plist: each preset knows its destination path
+# (Root/ACPI/Add, Root/Kernel/Add, ...), the container types
+# along it (d = dict, a = array), and the value to insert.
+# the terminal editor has no pointer, so T offers the whole
+# list and the preset's own path decides where it lands.
+_MENU_CACHE_PATH = None
+_MENU_CACHE_DATA = None
+
+def _template_root():
+    # repo layout: this file sits next to Scripts/menu.plist
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                        "Scripts", "menu.plist")
+
+def _template_data():
+    # lazy one-time load of menu.plist; returns {section: {path: [items]}}
+    global _MENU_CACHE_PATH, _MENU_CACHE_DATA
+    p = _template_root()
+    if _MENU_CACHE_PATH == p and _MENU_CACHE_DATA is not None:
+        return _MENU_CACHE_DATA
+    if not os.path.exists(p):
+        return None
+    try:
+        from propertreecli import load_plist
+        data = load_plist(p)
+        _MENU_CACHE_PATH = p
+        _MENU_CACHE_DATA = data
+        return data
+    except Exception:
+        return None
 
 # ── the editor ────────────────────────────────────────────────
 class Editor:
@@ -566,6 +702,185 @@ class Editor:
         self._after_mutate()
         self._flash("changed to {}".format(target), "grn")
 
+    # ── converter (^t) ────────────────────────────────────────
+    def _convert_value(self):
+        # port of the tk gui's Convert Window, bound to the selected
+        # value: pick from/to encodings, tweak the text, convert.
+        # enter on the result writes the source back into the value
+        # (interpreted as its own kind), so pasting foreign base64
+        # or hex into a data field works in one trip.
+        row = self.rows[self.sel]
+        if not row["leaf"]:
+            self._flash("converter works on values, not containers", "red")
+            return
+        v = row["node"]
+        kind = _type_name(v)
+        if kind not in ("string", "data", "integer"):
+            self._flash("converter works on string, data, and integer values", "red")
+            return
+        label = self._row_label(row)
+        fi, ti = _convert_prefill(kind)
+        f = self._menu("convert {} - from ({})".format(label, _CONV_NAMES[fi]),
+                       list(_CONV_NAMES), sel=fi)
+        if f is None:
+            return
+        t = self._menu("convert {} - to ({})".format(label, _CONV_NAMES[ti]),
+                       list(_CONV_NAMES), sel=ti)
+        if t is None:
+            return
+        fname, tname = _CONV_NAMES[f], _CONV_NAMES[t]
+        text = self._prompt("convert ({} -> {}):".format(fname, tname),
+                            canonical(v))
+        if text is None:
+            return
+        if not text.strip() and kind != "string":
+            self._flash("nothing to convert", "red")
+            return
+        try:
+            result = _convert_text(text, fname, tname)
+        except ValueError as e:
+            self._flash(str(e), "red")
+            return
+        # result box: show the conversion, enter writes back
+        w = self.W()
+        chunk = max(w - 8, 12)
+        lines = ["{}  ({} -> {})".format(label, fname, tname)]
+        rl = result if len(result) <= chunk else result[:chunk - 1] + "\u2026"
+        lines.append(rl)
+        lines.append("")
+        lines.append("enter = write source back as {}".format(kind))
+        if not self._choice_box("convert", lines):
+            self._flash("converted (not written)")
+            return
+        try:
+            new = _convert_apply(kind, text, fname)
+        except ValueError as e:
+            self._flash(str(e), "red")
+            return
+        if new == v:
+            self._flash("unchanged")
+            return
+        self._push_undo()
+        parent, last = self._parent_of(row)
+        if isinstance(parent, dict):
+            parent[last] = new
+        else:
+            parent[int(last)] = new
+        self._after_mutate()
+        self._flash("converted \u2713", "grn")
+
+    # ── insert from template (T) ──────────────────────────────
+    def _insert_template(self):
+        data = _template_data()
+        if not data:
+            self._flash("template data missing - Scripts/menu.plist not found", "red")
+            return
+        if not isinstance(self.root, dict):
+            self._flash("template presets need a dictionary root", "red")
+            return
+        sections = sorted(s for s in data if isinstance(data[s], dict) and data[s])
+        if not sections:
+            self._flash("no template sections found", "red")
+            return
+        pick = self._menu("insert from template - section", sections)
+        if pick is None:
+            return
+        section = sections[pick]
+        paths = sorted(p for p in data[section]
+                       if isinstance(data[section][p], list) and data[section][p])
+        labels = [p.replace("Root/", "", 1) if p.startswith("Root/") else p
+                  for p in paths]
+        pick = self._menu("insert from template - {}".format(section), labels)
+        if pick is None:
+            return
+        path = paths[pick]
+        # presets are the entries with a name + types + value; separator
+        # and title rows are menu furniture the terminal does not need
+        presets = [e for e in data[section][path]
+                   if isinstance(e, dict) and "name" in e
+                   and "types" in e and "value" in e]
+        if not presets:
+            self._flash("no insertable presets under {}".format(labels[pick]), "red")
+            return
+        names = [e["name"] for e in presets]
+        pick = self._menu("insert - {}".format(labels[pick]), names)
+        if pick is None:
+            return
+        self._template_apply(path, presets[pick])
+
+    def _template_apply(self, path, preset):
+        # walk the preset's own path from the root, creating missing
+        # containers (d = dict, a = array), then drop the value in:
+        # arrays append, dicts merge keys. mirrors the tk gui's
+        # merge_menu_preset, minus the drag-and-drop bookkeeping.
+        types = str(preset.get("types", "")).split("/")
+        value = preset.get("value")
+        segs = [s for s in str(path).split("/") if s]
+        if segs and segs[0].lower() == "root":
+            segs, types = segs[1:], types[1:]
+        if not segs or len(segs) != len(types) or not isinstance(value, dict):
+            self._flash("malformed preset ({})".format(path), "red")
+            return
+        # walk until the first segment that is missing or the wrong
+        # type - from there down everything gets (re)built fresh
+        cur = self.root
+        question = None
+        replace_kind = None
+        complete = True
+        for seg, typ in zip(segs, types):
+            want_list = str(typ).lower() == "a"
+            if not isinstance(cur, dict):
+                # an array sits mid-path; presets only descend dicts
+                self._flash("preset path crosses an array ({})".format(path), "red")
+                return
+            if seg not in cur:
+                complete = False
+                break
+            ex = cur[seg]
+            good = isinstance(ex, list) if want_list else isinstance(ex, dict)
+            if not good:
+                question = "{} is a {} - replace it with {}?".format(
+                    seg, _type_name(ex), "array" if want_list else "dict")
+                replace_kind = "array" if want_list else "dict"
+                complete = False
+                break
+            cur = ex
+        if question is not None and not self._confirm(question):
+            self._flash("template not applied")
+            return
+        if complete and isinstance(cur, dict):
+            for k in value:
+                if k in cur:
+                    if not self._confirm("key {} already exists - replace it?".format(k)):
+                        self._flash("template not applied")
+                        return
+        # apply (single undo step covers the whole insert)
+        self._push_undo()
+        cur = self.root
+        for seg, typ in zip(segs, types):
+            want_list = str(typ).lower() == "a"
+            if isinstance(cur, dict):
+                if seg not in cur or not (
+                        isinstance(cur[seg], list) if want_list
+                        else isinstance(cur[seg], dict)):
+                    cur[seg] = [] if want_list else {}
+                cur = cur[seg]
+        if isinstance(cur, list):
+            cur.append(copy.deepcopy(value))
+            sel_path = segs + [len(cur) - 1]
+        else:
+            for k, v in value.items():
+                cur[k] = copy.deepcopy(v)
+            sel_path = segs + [list(value)[-1]]
+        # expand the container path so the insert is visible, then jump to it
+        for i in range(1, len(segs) + 1):
+            self.expanded[tuple(segs[:i])] = True
+        self._after_mutate()
+        idx = self._row_index_of_path(sel_path)
+        if idx is not None:
+            self.sel = idx
+        self._flash("inserted {}".format(preset.get("name", path)), "grn")
+
     def _duplicate_row(self):
         # copy the whole entry and insert it right after itself; dict keys
         # get a "copy" suffix that auto-increments on collision
@@ -920,6 +1235,8 @@ class Editor:
             "delete      d  (asks first, even for leaves)",
             "rename      r  (dict keys)",
             "type        t  (scalar conversions)",
+            "convert     ^t (text: ascii/base64/decimal/hex/binary)",
+            "template    T  (insert OC/Clover presets from menu.plist)",
             "move entry  <  >  (reorder inside its parent)",
             "copy/cut/paste   c  x  p  (shared /tmp clipboard)",
             "undo/redo   u / ctrl+r (200 steps)",
@@ -950,6 +1267,29 @@ class Editor:
             ch = self.s.getch()
             if ch != -1:
                 return
+
+    def _choice_box(self, title, lines):
+        # like _static_box, but enter = yes and esc = no so callers
+        # can branch on the answer
+        self._draw()
+        h, w = self.H(), self.W()
+        width = min(max(len(title) + 6, max(len(l) for l in lines) + 6), w - 4)
+        vis = lines[: max(h - 6, 1)]
+        top = max((h - len(vis) - 4) // 2, 0)
+        left = max((w - width) // 2, 0)
+        self._box(title, [" " * (width - 4)] * len(vis), width)
+        for i, l in enumerate(vis):
+            y = top + 3 + i
+            self.s.addstr(y, left + 2, l[: width - 4])
+        self.s.refresh()
+        while True:
+            ch = self.s.getch()
+            if ch in (10, 13, curses.KEY_ENTER):
+                return True
+            if ch in (27, ord("q"), ord("n")):
+                return False
+            if ch != -1:
+                return False
 
     # ── prompt line ───────────────────────────────────────────
     def _prompt(self, label, prefill="", cycle=None, cycle_i=0):
@@ -1250,6 +1590,10 @@ class Editor:
             self._rename_row()
         elif ch == ord("t"):
             self._change_type()
+        elif ch in (20,):  # ctrl+t: the value converter (tk gui parity)
+            self._convert_value()
+        elif ch == ord("T"):
+            self._insert_template()
         elif ch in (ord("c"),):
             self._copy_row(cut=False)
         elif ch in (ord("x"),):

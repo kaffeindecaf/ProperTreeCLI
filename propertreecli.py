@@ -5,7 +5,7 @@
 # single source of truth for the version  -  keep this in sync with the
 # update feed when 4.3 lands. the command is `plist`; the file keeps the
 # repo name so it can never shadow Scripts/plist.py on import.
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 import argparse
 import datetime
