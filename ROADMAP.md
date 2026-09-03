@@ -135,6 +135,16 @@ snapshot logic in plistwindow.py, the converter, the settings model.
   clear errors with a hint, running bare with no config.plist suggests
   plist test.plist / plist new / plist help, and `plist help` works as an
   alias for -h. hints go to stderr so --json and piped output stay clean._
+- [x] **1.7 diff** - `plist diff <fileA> <fileB>` walks both trees and
+      prints what differs as keypaths: + added, - removed, ~ changed,
+      arrays by index and dicts by key, recursion stopping at the
+      first difference so a whole subtree reads as one line. exit 0
+      identical, 1 differences, 2 file error - scriptable, which is
+      the whole point of the one-shots.
+  _Done 2026-09-03: cmd_diff in propertreecli.py, wired into COMMANDS +
+  help. output sorted by keypath, containers summarized as <dict N
+  keys> / <array N items>, summary line at the end. test.plist-vs-edited
+  copies covered in the /tmp suite._
 
 ## 2 - the editor (the main event)
 
@@ -320,17 +330,22 @@ snapshot logic in plistwindow.py, the converter, the settings model.
       key=value with # comments, template written on first run. schema
       doubles as the docs, same trick as W0lfSword's config_schema().
       keys: expand_mode (all/auto/none), format (xml/binary), find_scope
-      (keys/values/both). validation lives in load_config; unknown or
-      invalid values fall back to defaults instead of erroring.
+      (keys/values/both), theme (frost/red). validation lives in
+      load_config; unknown or invalid values fall back to defaults
+      instead of erroring.
   _Done 2026-09-03: the file itself landed with 2.10; the schema is now
   CONFIG_DEFAULTS + CONFIG_VALID in propertreecli.py, load_config
   validates every key against CONFIG_VALID, and `plist settings` (4.2)
-  manages it from the cli. keys that were planned and got cut, on
-  purpose: animations on/off (the animation feature was removed from the
-  product), prompt_symbol and logo/color toggles (the look is fixed,
-  color already bows to --no-color / NO_COLOR / non-tty), data/int/bool
-  display styles (the editor renders values readably as-is; revisit only
-  if someone asks)._
+  manages it from the cli. theme = red (added same day, user request)
+  recolors the whole ui: the curses editor swaps its palette maps for
+  red variants (accents 196, dim 124, depth shades 160/124/88) and the
+  ansi one-shots swap their escapes when the config says so - every
+  text color goes red, hints stay muted. keys that were planned and got
+  cut, on purpose: animations on/off (the animation feature was removed
+  from the product), prompt_symbol and logo/color toggles (the look is
+  fixed, color already bows to --no-color / NO_COLOR / non-tty),
+  data/int/bool display styles (the editor renders values readably
+  as-is; revisit only if someone asks)._
 - [x] **4.2 settings command** - `plist settings` shows the file,
       `settings set key value` validates and writes, `settings reset`
       restores defaults. no menu for it in the tui yet; editing by hand

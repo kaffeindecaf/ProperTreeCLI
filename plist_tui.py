@@ -28,6 +28,11 @@ import traceback
 _EXACT = {"frost": 117, "brand": 153, "dim": 240, "grn": 2, "amb": 3, "red": 1}
 _16 = {"frost": 14, "brand": 14, "dim": 8, "grn": 10, "amb": 11, "red": 9}
 _8 = {"frost": 6, "brand": 6, "dim": 7, "grn": 2, "amb": 3, "red": 1}
+# theme = red turns every text color red: accents at 196, dim at 124 so
+# hints stay muted, and the depth shades walk down through darker reds.
+_RED_EXACT = {"frost": 196, "brand": 196, "dim": 124, "grn": 196, "amb": 196, "red": 196}
+_RED_16 = {"frost": 9, "brand": 9, "dim": 1, "grn": 9, "amb": 9, "red": 9}
+_RED_8 = {"frost": 1, "brand": 1, "dim": 1, "grn": 1, "amb": 1, "red": 1}
 # pairs: 1 frost(accents/keys) 2 dim 3 grn 4 amb 5 red 6 brand 7 sel bar
 # depth pairs 10..15: d1..d6 for nested levels. d0 is not a real pair -
 # top-level keys draw as plain frost (PAIR d0 -> 1) so the root of a file
@@ -40,6 +45,18 @@ PAIR = {}
 # terminal-dependent and entries 16-21 silently render as black on
 # terminals that ignore it, which looks like missing text.
 _DEPTH_STOCK = [110, 103, 102, 102, 102, 102]  # d1..d6, clamped at d3
+# red theme: same idea, darker reds per level (clamped at 88)
+_DEPTH_RED = [160, 124, 88, 88, 88, 88]
+
+def _load_theme():
+    # which palette theme the config asks for; never throws - a missing or
+    # broken config just means frost
+    try:
+        from propertreecli import ensure_config, load_config
+        ensure_config()
+        return load_config().get("theme", "frost")
+    except Exception:
+        return "frost"
 
 def _init_colors():
     curses.start_color()
@@ -47,12 +64,14 @@ def _init_colors():
         curses.use_default_colors()
     except curses.error:
         pass
+    red = _load_theme() == "red"
     if curses.COLORS >= 256:
-        m = _EXACT
+        m = _RED_EXACT if red else _EXACT
     elif curses.COLORS >= 16:
-        m = _16
+        m = _RED_16 if red else _16
     else:
-        m = _8
+        m = _RED_8 if red else _8
+    depth = _DEPTH_RED if red else _DEPTH_STOCK
     for i, key in enumerate(("frost", "dim", "grn", "amb", "red", "brand"), 1):
         try:
             curses.init_pair(i, m[key], -1)
@@ -72,7 +91,7 @@ def _init_colors():
     PAIR["d0"] = 1  # top level = plain frost, same as the original keys
     if curses.COLORS >= 256:
         # stock-index depth shades, pairs 10..15 (d1..d6)
-        for i, idx in enumerate(_DEPTH_STOCK):
+        for i, idx in enumerate(depth):
             try:
                 curses.init_pair(10 + i, idx, -1)
             except curses.error:
@@ -80,7 +99,7 @@ def _init_colors():
             PAIR["d{}".format(i + 1)] = 10 + i
     else:
         # 8/16-color terminals: no depth tint, every key plain frost
-        for i in range(1, len(_DEPTH_STOCK) + 1):
+        for i in range(1, len(depth) + 1):
             PAIR["d{}".format(i)] = 1
 
 def P(name, bold=False):

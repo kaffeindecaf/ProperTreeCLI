@@ -5,7 +5,7 @@
 # single source of truth for the version  -  keep this in sync with the
 # update feed when 4.3 lands. the command is `plist`; the file keeps the
 # repo name so it can never shadow Scripts/plist.py on import.
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 import argparse
 import datetime
@@ -311,12 +311,14 @@ def open_and_show(path, show_banner=True):
 # ── config ────────────────────────────────────────────────────
 # plain key=value file, # comments, template written on first run.
 # the schema doubles as the docs, same trick as W0lfSword's config_schema().
-CONFIG_DEFAULTS = {"expand_mode": "auto", "format": "xml", "find_scope": "both"}
+CONFIG_DEFAULTS = {"expand_mode": "auto", "format": "xml", "find_scope": "both",
+                   "theme": "frost"}
 # valid values per key, so `plist settings set` can validate before writing
 CONFIG_VALID = {
     "expand_mode": ("all", "auto", "none"),
     "format": ("xml", "binary"),
     "find_scope": ("keys", "values", "both"),
+    "theme": ("frost", "red"),
 }
 CONFIG_TEMPLATE = """# plist config - plain key=value, # comments. the editor reads this
 # on open. edit by hand, or manage it with: plist settings
@@ -336,6 +338,9 @@ format = xml
 # find_scope - what / searches by default: keys | values | both
 # (tab inside the find prompt cycles the scope for that search)
 find_scope = both
+
+# theme - frost is the usual pale blue; red turns every text color red
+theme = frost
 """
 
 def config_dir():
@@ -376,6 +381,8 @@ def load_config():
         cfg["format"] = "xml"
     if cfg.get("find_scope") not in CONFIG_VALID["find_scope"]:
         cfg["find_scope"] = "both"
+    if cfg.get("theme") not in CONFIG_VALID["theme"]:
+        cfg["theme"] = "frost"
     return cfg
 
 # ── keypaths ──────────────────────────────────────────────────
@@ -696,6 +703,78 @@ def cmd_del(argv):
         ok("removed {}".format(a.keypath))
     return code
 
+def _fmt_diff_value(v):
+    # short value text for diff lines: containers as a count summary
+    if isinstance(v, dict):
+        return "<dict {} keys>".format(len(v))
+    if isinstance(v, list):
+        return "<array {} items>".format(len(v))
+    return value_text(v)
+
+def _diff_walk(a, b, path, out):
+    # out is a list of (kind, path, a_text, b_text) where kind is
+    # "+" added, "-" removed, "~" changed. arrays compare by index,
+    # dicts by key; recursion stops at the first difference.
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in a:
+            if k not in b:
+                out.append(("-", path + [k], _fmt_diff_value(a[k]), None))
+        for k in b:
+            if k not in a:
+                out.append(("+", path + [k], None, _fmt_diff_value(b[k])))
+        for k in a:
+            if k in b:
+                _diff_walk(a[k], b[k], path + [k], out)
+    elif isinstance(a, list) and isinstance(b, list):
+        for i in range(max(len(a), len(b))):
+            if i >= len(a):
+                out.append(("+", path + [i], None, _fmt_diff_value(b[i])))
+            elif i >= len(b):
+                out.append(("-", path + [i], _fmt_diff_value(a[i]), None))
+            else:
+                _diff_walk(a[i], b[i], path + [i], out)
+    elif a != b:
+        out.append(("~", path, _fmt_diff_value(a), _fmt_diff_value(b)))
+
+def _fmt_diff_path(path):
+    # dotted keypath for display; array indexes read as plain numbers
+    return ".".join(str(s) for s in path)
+
+def cmd_diff(argv):
+    # plist diff <fileA> <fileB>: walk both trees, print what differs.
+    # exit codes: 0 identical, 1 differences, 2 file/usage error.
+    p = argparse.ArgumentParser(prog="plist diff",
+        description="compare two plists, print added/removed/changed keypaths")
+    p.add_argument("files", nargs=2, metavar="file")
+    a = p.parse_args(argv)
+    f1, f2 = a.files
+    r1 = _load_or_err(f1)
+    if r1 is None:
+        return 2
+    r2 = _load_or_err(f2)
+    if r2 is None:
+        return 2
+    out = []
+    _diff_walk(r1, r2, [], out)
+    # sort by keypath so the output is stable and readable
+    out.sort(key=lambda t: _fmt_diff_path(t[1]))
+    for kind, path, va, vb in out:
+        kp = _fmt_diff_path(path)
+        if kind == "+":
+            print("  " + C_GRN + "+ " + NC + kp + " = " + vb)
+        elif kind == "-":
+            print("  " + C_RED + "- " + NC + kp + " = " + va)
+        else:
+            print("  " + C_AMB + "~ " + NC + kp + ": " + va + "  ->  " + vb)
+    if out:
+        n_add = sum(1 for t in out if t[0] == "+")
+        n_del = sum(1 for t in out if t[0] == "-")
+        n_chg = len(out) - n_add - n_del
+        info("{} added, {} removed, {} changed".format(n_add, n_del, n_chg))
+        return 1
+    ok("identical")
+    return 0
+
 def cmd_new(argv):
     p = argparse.ArgumentParser(prog="plist new",
         description="create a new empty plist and open it in the editor")
@@ -812,11 +891,11 @@ def cmd_settings(argv):
 # ── cli ───────────────────────────────────────────────────────
 JSON_OUT = False
 
-COMMANDS = ("get", "set", "del", "convert", "edit", "new", "settings", "help")
+COMMANDS = ("get", "set", "del", "diff", "convert", "edit", "new", "settings", "help")
 
 SHORT_USAGE = (
     "usage: plist [--json] [--no-color] <command> [args] | <file...>\n"
-    "       commands: get, set, del, convert, edit, new, settings   (plist help for details)"
+    "       commands: get, set, del, diff, convert, edit, new, settings   (plist help for details)"
 )
 
 HELP = """\
@@ -832,6 +911,8 @@ usage:
   plist set <file> <keypath> <value> [-i|-f|-b|-x|-d|-u]
                                           set the value at a keypath
   plist del <file> <keypath>              remove a key or array element
+  plist diff <fileA> <fileB>              show added/removed/changed keys
+                                          (exit 0 identical, 1 differs)
   plist convert <file> --to xml|binary [-o out]
                                           rewrite in the other format
   plist new <file> [--binary] [--root dict|array]
@@ -862,7 +943,9 @@ config: ~/.config/propertreecli/config (created on first editor run).
 expand_mode = all | auto | none decides how containers open; format
 = xml | binary is what plist new writes; find_scope = keys | values |
 both is what / searches by default (tab inside the find prompt cycles
-the scope for that search). plist settings shows and changes these.
+the scope for that search); theme = frost | red picks the palette
+(red turns every text color red). plist settings shows and changes
+these.
 
 one-shots:
   keypaths are dot separated: Misc.Boot.Timeout or Drivers.0.Path; a
@@ -887,6 +970,16 @@ def _apply_color_flags():
         COLOR = False
     if not COLOR:
         reset_colors()
+        return
+    # theme = red from the config file turns every color red (frost 196,
+    # dim 124 so hints stay muted) - same idea as the editor palette
+    try:
+        if load_config().get("theme") == "red":
+            global C_BRAND, C_FROST, C_DIM, C_GRN, C_AMB, C_RED
+            C_BRAND = C_FROST = C_GRN = C_AMB = C_RED = "\033[38;5;196m"
+            C_DIM = "\033[38;5;124m"
+    except Exception:
+        pass
 
 def _tty():
     return sys.stdout.isatty() and sys.stdin.isatty()
@@ -962,6 +1055,8 @@ def main(argv=None):
             return cmd_set(sub)
         if cmd == "del":
             return cmd_del(sub)
+        if cmd == "diff":
+            return cmd_diff(sub)
         return cmd_convert(sub)
     if help_wanted or cmd.startswith("-"):
         print(HELP)
