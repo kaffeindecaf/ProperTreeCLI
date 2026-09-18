@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-# plist_tui - the curses editor behind `plist <file>` (roadmap section 2)
+# plist_tui - the curses editor behind `plist <file>`
+# new code in the ProperTree tree, BSD-3 like the rest (see LICENSE).
 # imports helpers from propertreecli lazily, so the module only loads
-# when an interactive session actually starts.
+# when an editor actually starts.
 #
 # layout, top to bottom:
 #   header:  file (frost bold)  format  dirty marker      hints (dim)
@@ -158,7 +159,7 @@ def _parse(text, kind):
     from propertreecli import parse_value
     return parse_value(text, kind)
 
-# ── converter (roadmap 2.9) ─────────────────────────────────
+# ── converter (ctrl+t) ────────────────────────────────────────
 # the tk gui's Convert Window (Ctrl+T) is a scratchpad that
 # renders text as bytes in one encoding and back out in another.
 # same five views here: ascii, base64, decimal, hex, binary.
@@ -261,7 +262,7 @@ def _convert_apply(kind, text, frm):
             raise ValueError("not text in that base64 - view only")
     raise ValueError("decimal/binary cannot rebuild a string - view only")
 
-# ── insert-from-template (roadmap 2.9) ───────────────────────
+# ── insert from template (T) ──────────────────────────────────
 # the tk gui right-clicks a node and offers presets from
 # Scripts/menu.plist: each preset knows its destination path
 # (Root/ACPI/Add, Root/Kernel/Add, ...), the container types

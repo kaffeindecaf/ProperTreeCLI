@@ -3,7 +3,7 @@
 Edit plists the way you edit config files on a server: from the
 terminal, over ssh, inside tmux, on a machine with no display at all.
 
-    plist test.plist
+    plist tests/sample.plist
 
 opens a plist as a tree you can walk with the arrow keys, fold like
 a file explorer, edit inline, and save with ctrl+s. Styled after
@@ -13,20 +13,20 @@ exploit toolkit, it is good enough for an EFI folder.
 
 ProperTreeCLI is a fork of corpnewt's ProperTree, a tkinter app. The
 gui still works; the point of this repo is the command line twin. It
-keeps the parts worth keeping (Scripts/plist.py handles xml + binary
-plists, the snapshot logic stays for later) and adds what a terminal
-tool should have: scriptable one-shots, exit codes, and no window.
+sits on Scripts/plist.py for the xml and binary io and adds what a
+terminal tool should have: scriptable one-shots, exit codes, and no
+window.
 
-test.plist in the repo root is a small sample config (nested dicts,
-arrays, data, a date) for trying it out. No file yet? plist new
-my.plist starts one from scratch.
+tests/sample.plist is a small config to try it on (nested dicts,
+arrays, data, a date). No file yet? plist new my.plist starts one
+from scratch.
 
 ## Try it in a minute
 
     git clone https://github.com/kaffeindecaf/ProperTreeCLI
     cd ProperTreeCLI
-    ./install.sh          # symlinks `plist` into ~/.local/bin
-    plist test.plist      # sample editor (q quits, ? shows keys)
+    ./install.sh                  # symlinks `plist` into ~/.local/bin
+    plist tests/sample.plist      # sample editor (q quits, ? shows keys)
     plist --version
 
 No pip, no venv, no tkinter. Stdlib only. Run plist from any
@@ -37,7 +37,7 @@ just the tree, so it greps and scripts.
 
 ## The editor
 
-    plist test.plist
+    plist tests/sample.plist
 
 j/k or the arrows move, home/end top/bottom, ctrl+d / ctrl+u half a
 page, { } jump between siblings, left/right fold containers, enter
@@ -110,20 +110,35 @@ run, XDG_CONFIG_HOME aware):
 
 plist settings shows and changes these without hand-editing the file.
 
-## State of things
+## What is reused from ProperTree
 
-The editor and one-shots sit on the parts of ProperTree worth keeping
-instead of rewriting them:
+The terminal side does not rewrite what already works:
 
-- Scripts/plist.py handles xml and binary plists, data, uid, 0x ints
-- the oc snapshot code walks ACPI/Kexts/Tools/Drivers, orders kexts
-  by dependency, and detects the schema from OpenCore.efi's md5 - a
-  headless snapshot command is next, tracked in ROADMAP.md
-- find/replace is ported, as are the value converter and the
-  OpenCore/Clover insert-from-template presets
+- Scripts/plist.py reads and writes xml and binary plists, data, uids
+  and 0x integers, the same code path the gui uses
+- the value converter, find/replace (with the gui's find scope) and the
+  OpenCore/Clover insert-from-template presets are ports of the gui's
+  behaviour, not new implementations
 
-Progress lives in ROADMAP.md. It is a checklist, not a plan: one item
-per session, done end to end or not done.
+Neither propertreecli.py nor plist_tui.py imports the gui: the only
+shared code is Scripts/plist.py.
+
+## Adding this to an existing ProperTree checkout
+
+Everything here is additive, so the two can live in one checkout. No
+file that ships with ProperTree is modified:
+
+| added | what it is |
+| --- | --- |
+| propertreecli.py | the `plist` command, the one-shots, the plist io |
+| plist_tui.py | the curses editor |
+| install.sh | symlinks `plist` into ~/.local/bin |
+| tests/ | pty smoke tests, plus the sample plist |
+
+Copy those in next to ProperTree.py and Scripts/, and `python3
+propertreecli.py --version` works with no install step. `./install.sh`
+puts `plist` on PATH. python 3 only, no dependencies, no build, same
+BSD 3-Clause licence as upstream.
 
 ## Tests
 
@@ -140,7 +155,7 @@ framework, no deps, exit code says pass or fail.
     python3 ProperTree.py [file.plist]
 
 needs python 3 with tkinter (apt install python3-tk on debian/ubuntu).
-That dependency goes away with the gui.
+The terminal side does not: it needs neither tkinter nor the gui.
 
 ## Credit
 

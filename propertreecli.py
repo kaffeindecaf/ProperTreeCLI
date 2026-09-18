@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # propertreecli - a plist editor for the terminal
-# fork of corpnewt/ProperTree (BSD-3), look stolen from W0lfSword
+# new code in corpnewt's ProperTree tree, BSD-3 like the rest (see
+# LICENSE). the terminal look is styled after W0lfSword, a toolkit of
+# mine.
 #
-# single source of truth for the version  -  keep this in sync with the
-# update feed when 4.3 lands. the command is `plist`; the file keeps the
-# repo name so it can never shadow Scripts/plist.py on import.
+# VERSION is the single source of truth. the command is `plist`; the
+# file keeps the repo name so it can never shadow Scripts/plist.py on
+# import.
 VERSION = "0.5.0"
 
 import argparse
@@ -1027,7 +1029,7 @@ def main(argv=None):
         if os.path.exists("config.plist"):
             return _start_editor("config.plist") if _tty() else open_and_show("config.plist")
         err("nothing to open: no config.plist in this directory")
-        hint_err("try: plist test.plist       (open a plist)")
+        hint_err("try: plist <file.plist>     (open a plist)")
         hint_err("     plist new my.plist     (start from scratch)")
         hint_err("     plist help             (everything)")
         return 1
