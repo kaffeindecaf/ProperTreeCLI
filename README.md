@@ -39,7 +39,13 @@ just the tree, so it greps and scripts.
 
     plist test.plist
 
-
+j/k or the arrows move, home/end top/bottom, ctrl+d / ctrl+u half a
+page, { } jump between siblings, left/right fold containers, enter
+edits a value (booleans toggle), i adds an entry (pick the type, then
+name it - on an empty plist it fills the root), D duplicates, d
+deletes, r renames a key, t changes a value's type, c/x/p
+copy/cut/paste, u undoes (ctrl+r redoes, 200 steps), ctrl+s saves, q
+quits (it asks when the file is dirty). ? shows every keybind.
 
 / finds. n and N cycle the matches, esc clears. tab inside the find
 prompt picks what to search - keys, values, or both - and the choice
