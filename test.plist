@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>Comment</key>
-	<string>sample plist - try: plist test.plist  (q to quit, ? for keys)</string>
+	<string>press enter and type something!</string>
 	<key>Boot-args</key>
 	<string>-v keepsyms=1 debug=0x100</string>
 	<key>csr-active-config</key>

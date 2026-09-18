@@ -119,6 +119,16 @@ instead of rewriting them:
 Progress lives in ROADMAP.md. It is a checklist, not a plan: one item
 per session, done end to end or not done.
 
+## Tests
+
+    tests/run.sh          # compile check + pty smoke tests, stdlib only
+
+drives the real editor over a pty and asserts on the saved file: filling
+a brand new plist of both root types (the empty tree has no rows to
+select, so `i` has to fall back to the root), plus sibling insert order,
+fold, copy/paste, undo, rename and clean quit on a normal tree. no
+framework, no deps, exit code says pass or fail.
+
 ## Running the original gui
 
     python3 ProperTree.py [file.plist]

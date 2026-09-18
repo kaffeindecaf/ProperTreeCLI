@@ -473,6 +473,31 @@ class Editor:
                 parent = parent[int(seg)]
         return parent, p[-1]
 
+    def _sel_row(self):
+        # the selected row, or None when the tree is empty: the root
+        # container is never drawn as a row, so a fresh `plist new` (or
+        # any empty root) has no rows at all for the row ops to point at
+        if not self.rows:
+            kind = ("dict" if getattr(self, "root_is_dict", False)
+                    else "array" if getattr(self, "root_is_list", False) else "plist")
+            self._flash("empty {} - press i to add the first entry".format(kind))
+            return None
+        return self.rows[self.sel]
+
+    def _target_of_row(self, row):
+        # (container, anchor, into_container) for an add or a paste: a
+        # container row takes children, a leaf row takes siblings, and no
+        # row at all means the root itself is the container
+        if row is None:
+            return self.root, None, True
+        if isinstance(row["node"], (dict, list)):
+            return self._node_at(row["path"]), None, True
+        return self._node_at(row["path"][:-1]), row["path"][-1], False
+
+    def _last(self):
+        # index of the last row, 0 when the tree is empty (never -1)
+        return max(len(self.rows) - 1, 0)
+
     # ── save / quit ───────────────────────────────────────────
     def _save(self):
         from propertreecli import file_format, write_plist
@@ -508,7 +533,9 @@ class Editor:
         self._recompute_matches()
 
     def _toggle_expand(self, row=None):
-        row = row or self.rows[self.sel]
+        row = row or self._sel_row()
+        if row is None:
+            return
         p = tuple(row["path"])
         self.expanded[p] = not self.expanded.get(p, True)
         self._rebuild_rows_keep(row["path"])
@@ -523,19 +550,15 @@ class Editor:
         return isinstance(parent, dict)
 
     def _add_entry(self):
-        row = self.rows[self.sel]
-        if isinstance(row["node"], (dict, list)):
-            parent_path, anchor = row["path"], None   # child: append at end
-            into_container = True
-        else:
-            parent_path, anchor = row["path"][:-1], row["path"][-1]
-            into_container = False
-        parent = self.root
-        for seg in parent_path:
-            parent = parent[seg] if isinstance(parent, dict) else parent[int(seg)]
+        # no rows means an empty tree, so the root is the container to
+        # add into - this is the only way to fill a fresh plist
+        row = self.rows[self.sel] if self.rows else None
+        if row is None and not isinstance(self.root, (dict, list)):
+            self._flash("the root is a {} value - nothing to add to".format(
+                _type_name(self.root)), "red")
+            return
+        parent, anchor, _ = self._target_of_row(row)
         types = list(_KINDS.keys()) + ["dict", "array"]
-        if not into_container and isinstance(parent, list) and anchor is None:
-            types = [t for t in types]  # arrays can hold anything
         pick = self._menu("add entry - type", types)
         if pick is None:
             return
@@ -611,7 +634,9 @@ class Editor:
                     stack.append((v, cur, i))
 
     def _delete_row(self):
-        row = self.rows[self.sel]
+        row = self._sel_row()
+        if row is None:
+            return
         parent, last = self._parent_of(row)
         label = self._row_label(row)
         if isinstance(parent, dict):
@@ -641,7 +666,9 @@ class Editor:
         self._replace_parent_dict(d, out)
 
     def _rename_row(self):
-        row = self.rows[self.sel]
+        row = self._sel_row()
+        if row is None:
+            return
         if not isinstance(row["key"], str):
             self._flash("array elements have no key to rename", "red")
             return
@@ -667,7 +694,9 @@ class Editor:
         self._flash("renamed to {}".format(new), "grn")
 
     def _change_type(self):
-        row = self.rows[self.sel]
+        row = self._sel_row()
+        if row is None:
+            return
         if not row["leaf"]:
             self._flash("change type works on values, not containers", "red")
             return
@@ -709,7 +738,9 @@ class Editor:
         # enter on the result writes the source back into the value
         # (interpreted as its own kind), so pasting foreign base64
         # or hex into a data field works in one trip.
-        row = self.rows[self.sel]
+        row = self._sel_row()
+        if row is None:
+            return
         if not row["leaf"]:
             self._flash("converter works on values, not containers", "red")
             return
@@ -884,7 +915,9 @@ class Editor:
     def _duplicate_row(self):
         # copy the whole entry and insert it right after itself; dict keys
         # get a "copy" suffix that auto-increments on collision
-        row = self.rows[self.sel]
+        row = self._sel_row()
+        if row is None:
+            return
         parent, last = self._parent_of(row)
         payload = copy.deepcopy(row["node"])
         self._push_undo()
@@ -907,7 +940,9 @@ class Editor:
 
     def _sibling_jump(self, direction):
         # { / }: jump to the previous / next sibling of the current row
-        row = self.rows[self.sel]
+        row = self._sel_row()
+        if row is None:
+            return
         parent_path = tuple(row["path"][:-1])
         sib = [i for i, r in enumerate(self.rows)
                if tuple(r["path"][:-1]) == parent_path]
@@ -922,7 +957,9 @@ class Editor:
         self.sel = sib[npos]
 
     def _move_row(self, delta):
-        row = self.rows[self.sel]
+        row = self._sel_row()
+        if row is None:
+            return
         parent, last = self._parent_of(row)
         if isinstance(parent, dict):
             keys = list(parent.keys())
@@ -962,7 +999,9 @@ class Editor:
 
     # ── value editing ─────────────────────────────────────────
     def _edit_value(self):
-        row = self.rows[self.sel]
+        row = self._sel_row()
+        if row is None:
+            return
         if not row["leaf"]:
             self._toggle_expand(row)
             return
@@ -999,7 +1038,9 @@ class Editor:
 
     # ── clipboard ─────────────────────────────────────────────
     def _copy_row(self, cut=False):
-        row = self.rows[self.sel]
+        row = self._sel_row()
+        if row is None:
+            return
         payload = copy.deepcopy(row["node"])
         from propertreecli import _plist_mod
         plist = _plist_mod()
@@ -1019,7 +1060,9 @@ class Editor:
             self._flash("copied {}".format(self._row_label(row)), "grn")
 
     def _delete_row_no_confirm(self):
-        row = self.rows[self.sel]
+        row = self._sel_row()
+        if row is None:
+            return
         parent, last = self._parent_of(row)
         self._push_undo()
         if isinstance(parent, dict):
@@ -1043,15 +1086,16 @@ class Editor:
         except Exception as e:
             self._flash("clipboard read failed: {}".format(e), "red")
             return
-        row = self.rows[self.sel]
-        if isinstance(row["node"], (dict, list)):
-            parent_path, anchor = row["path"], None
-            parent = self._node_at(parent_path)
-        else:
-            parent_path, anchor = row["path"][:-1], row["path"][-1]
-            parent = self._node_at(parent_path)
+        row = self.rows[self.sel] if self.rows else None
+        if row is None and not isinstance(self.root, (dict, list)):
+            self._flash("the root is a {} value - nothing to paste into".format(
+                _type_name(self.root)), "red")
+            return
+        parent, anchor, _ = self._target_of_row(row)
         if isinstance(parent, dict):
-            key = self._prompt("paste as key:", str(row["key"]) if isinstance(row["key"], str) else "")
+            default = (str(row["key"])
+                       if row is not None and isinstance(row["key"], str) else "")
+            key = self._prompt("paste as key:", default)
             if key is None:
                 return
             if key in parent:
@@ -1231,6 +1275,7 @@ class Editor:
             "fold        left/right or space, enter on a container",
             "edit        enter on a value (booleans toggle)",
             "add         i  (into a container, else as sibling)",
+            "            an empty plist has no rows: i fills the root",
             "duplicate   D  (copies under a new key / array slot)",
             "delete      d  (asks first, even for leaves)",
             "rename      r  (dict keys)",
@@ -1394,8 +1439,29 @@ class Editor:
         for i, r in enumerate(self.rows[self.top:self.top + list_h]):
             y = body_top + i
             self._draw_row(y, r, self.top + i == self.sel, self.top + i)
+        if not self.rows:
+            self._draw_empty(body_top)
         # footer / status
         self._draw_status(status)
+
+    def _draw_empty(self, y):
+        # an empty root draws no rows: say what the file is and how to
+        # fill it rather than leaving the body blank
+        if self.root_is_dict:
+            what = "dictionary"
+        elif self.root_is_list:
+            what = "array"
+        else:
+            what = "{} value".format(_type_name(self.root))
+        self.s.addstr(y, 2, "(empty {} root)".format(what), P("dim"))
+        hint = "press "
+        self.s.addstr(y + 1, 2, hint, P("dim"))
+        self.s.addstr(y + 1, 2 + len(hint), "i", P("frost", bold=True))
+        hint2 = " to add the first entry, or "
+        self.s.addstr(y + 1, 2 + len(hint) + 1, hint2, P("dim"))
+        self.s.addstr(y + 1, 2 + len(hint) + 1 + len(hint2), "T", P("frost", bold=True))
+        self.s.addstr(y + 1, 2 + len(hint) + 2 + len(hint2),
+                      " for an OpenCore preset", P("dim"))
 
     def _row_value_text(self, r):
         if not r["leaf"]:
@@ -1525,7 +1591,7 @@ class Editor:
         if d < 0:
             self.sel = max(self.sel - step, 0)
         else:
-            self.sel = min(self.sel + step, len(self.rows) - 1)
+            self.sel = min(self.sel + step, self._last())
 
     def _handle(self, ch):
         if ch == -1:
@@ -1543,12 +1609,14 @@ class Editor:
         elif ch in (ord("g"),):
             self.sel = 0
         elif ch in (ord("G"),):
-            self.sel = len(self.rows) - 1
+            self.sel = self._last()
         elif ch in (curses.KEY_NPAGE,):
-            self.sel = min(self.sel + self.H() - 6, len(self.rows) - 1)
+            self.sel = min(self.sel + self.H() - 6, self._last())
         elif ch in (curses.KEY_PPAGE,):
             self.sel = max(self.sel - (self.H() - 6), 0)
         elif ch in (curses.KEY_LEFT, ord("h")):
+            if not self.rows:
+                return None
             row = self.rows[self.sel]
             p = tuple(row["path"])
             if not row["leaf"] and self.expanded.get(p, True):
@@ -1560,6 +1628,8 @@ class Editor:
                 if i is not None:
                     self.sel = i
         elif ch in (curses.KEY_RIGHT, ord("l"), ord(" ")):
+            if not self.rows:
+                return None
             row = self.rows[self.sel]
             p = tuple(row["path"])
             if not row["leaf"] and not self.expanded.get(p, True):
@@ -1571,13 +1641,13 @@ class Editor:
         elif ch in (4, 21):  # ctrl+d / ctrl+u: half a page
             step = max((self.H() - 6) // 2, 1)
             if ch == 4:
-                self.sel = min(self.sel + step, len(self.rows) - 1)
+                self.sel = min(self.sel + step, self._last())
             else:
                 self.sel = max(self.sel - step, 0)
         elif ch in (curses.KEY_HOME,):
             self.sel = 0
         elif ch in (curses.KEY_END,):
-            self.sel = len(self.rows) - 1
+            self.sel = self._last()
         elif ch in (10, 13, curses.KEY_ENTER):
             self._edit_value()
         elif ch in (ord("i"), curses.KEY_IC):
